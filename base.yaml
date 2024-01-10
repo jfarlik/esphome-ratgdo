@@ -16,25 +16,9 @@ ratgdo:
   input_obst_pin: ${input_obst_pin}
 
 sensor:
-  - platform: ratgdo
-    id: ${id_prefix}_openings
-    type: openings
-    entity_category: diagnostic
-    ratgdo_id: ${id_prefix}
-    name: "Openings"
-    unit_of_measurement: "openings"
-    icon: mdi:open-in-app
+
 
 switch:
-  - platform: gpio
-    id: "${id_prefix}_status_door"
-    internal: true
-    pin:
-      number: ${status_door_pin}  # D0 output door status, HIGH for open, LOW for closed
-      mode:
-        output: true
-    name: "Status door"
-    entity_category: diagnostic
     
   - platform: gpio
     id: "${id_prefix}_status_obstruction"
@@ -57,13 +41,6 @@ binary_sensor:
       - switch.turn_on: ${id_prefix}_status_obstruction
     on_release:
       - switch.turn_off: ${id_prefix}_status_obstruction
-
-  - platform: ratgdo
-    type: button
-    id: ${id_prefix}_button
-    ratgdo_id: ${id_prefix}
-    name: "Button"
-    entity_category: diagnostic
 
   - platform: gpio
     id: "${id_prefix}_dry_contact_open"
