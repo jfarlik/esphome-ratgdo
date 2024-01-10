@@ -35,6 +35,7 @@ switch:
         output: true
     name: "Status door"
     entity_category: diagnostic
+    
   - platform: gpio
     id: "${id_prefix}_status_obstruction"
     internal: true
