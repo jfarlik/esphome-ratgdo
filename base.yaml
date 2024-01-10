@@ -29,6 +29,18 @@ switch:
         output: true
     name: "Status obstruction"
     entity_category: diagnostic
+    
+  - platform: gpio
+    id: "${id_prefix}_button"
+    internal: true
+    pin:
+      number: ${door_switch_pin}  # D1 cycle to open door
+    on_turn_on:
+    - delay 500ms
+    - switch.turn_off: 
+    name: "Button"
+    entity_category: diagnostic "${id_prefix}_button"
+    
 
 binary_sensor:
   - platform: ratgdo
@@ -79,7 +91,11 @@ binary_sensor:
             binary_sensor.is_off: ${id_prefix}_dry_contact_open
           then:
             - cover.close: ${id_prefix}_garage_door
-
+ 
+ - platform: homeassistant
+    id: "${id_prefix}_door_status"
+    entity_id: binary_sensor.garage_door_status
+            
 number:
   - platform: ratgdo
     id: ${id_prefix}_opening_duration
@@ -99,15 +115,10 @@ number:
 
 
 cover:
-  - platform: ratgdo
-    id: ${id_prefix}_garage_door
-    device_class: garage
-    name: "Door"
-    ratgdo_id: ${id_prefix}
-    on_closed:
-      - switch.turn_off: ${id_prefix}_status_door
-    on_open:
-      - switch.turn_on: ${id_prefix}_status_door
+  - platform: template
+  name: "Garage Door"
+  lambda: |-
+    if (id(
 
 button:
   - platform: restart
