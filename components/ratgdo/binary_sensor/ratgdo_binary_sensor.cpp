@@ -11,21 +11,21 @@ namespace ratgdo {
     {
         if (this->binary_sensor_type_ == SensorType::RATGDO_SENSOR_MOTION) {
             this->publish_initial_state(false);
-            this->parent_->subscribe_motion_state([=](MotionState state) {
+            this->parent_->subscribe_motion_state([=, this](MotionState state) {
                 this->publish_state(state == MotionState::DETECTED);
             });
         } else if (this->binary_sensor_type_ == SensorType::RATGDO_SENSOR_OBSTRUCTION) {
             this->publish_initial_state(false);
-            this->parent_->subscribe_obstruction_state([=](ObstructionState state) {
+            this->parent_->subscribe_obstruction_state([=, this](ObstructionState state) {
                 this->publish_state(state == ObstructionState::OBSTRUCTED);
             });
         } else if (this->binary_sensor_type_ == SensorType::RATGDO_SENSOR_MOTOR) {
-            this->parent_->subscribe_motor_state([=](MotorState state) {
+            this->parent_->subscribe_motor_state([=, this](MotorState state) {
                 this->publish_state(state == MotorState::ON);
             });
         } else if (this->binary_sensor_type_ == SensorType::RATGDO_SENSOR_BUTTON) {
             this->publish_initial_state(false);
-            this->parent_->subscribe_button_state([=](ButtonState state) {
+            this->parent_->subscribe_button_state([=, this](ButtonState state) {
                 this->publish_state(state == ButtonState::PRESSED);
             });
         }
