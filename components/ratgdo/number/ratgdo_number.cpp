@@ -52,15 +52,15 @@ namespace ratgdo {
         this->control(value);
 
         if (this->number_type_ == RATGDO_ROLLING_CODE_COUNTER) {
-            this->parent_->subscribe_rolling_code_counter([=](uint32_t value) {
+            this->parent_->subscribe_rolling_code_counter([=, this](uint32_t value) {
                 this->update_state(value);
             });
         } else if (this->number_type_ == RATGDO_OPENING_DURATION) {
-            this->parent_->subscribe_opening_duration([=](float value) {
+            this->parent_->subscribe_opening_duration([=, this](float value) {
                 this->update_state(value);
             });
         } else if (this->number_type_ == RATGDO_CLOSING_DURATION) {
-            this->parent_->subscribe_closing_duration([=](float value) {
+            this->parent_->subscribe_closing_duration([=, this](float value) {
                 this->update_state(value);
             });
         }
