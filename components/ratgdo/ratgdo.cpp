@@ -60,7 +60,7 @@ namespace ratgdo {
         ESP_LOGV(TAG, "Syncing rolling code counter after reboot...");
 
         // many things happening at startup, use some delay for sync
-        set_timeout(SYNC_DELAY, [=] { this->sync(); });
+        set_timeout(SYNC_DELAY, [=, this] { this->sync(); });
     }
 
     void RATGDOComponent::loop()
@@ -240,7 +240,7 @@ namespace ratgdo {
             }
         } else if (cmd == Command::MOTION) {
             this->motion_state = MotionState::DETECTED;
-            this->set_timeout("clear_motion", 3000, [=] {
+            this->set_timeout("clear_motion", 3000, [=, this] {
                 this->motion_state = MotionState::CLEAR;
             });
             if (*this->light_state == LightState::OFF) {
@@ -261,7 +261,7 @@ namespace ratgdo {
             this->door_move_delta, this->door_start_position, this->door_start_moving);
         auto duration = this->door_move_delta > 0 ? *this->opening_duration : *this->closing_duration;
         auto count = int(1000 * duration / update_period);
-        set_retry("position_sync_while_moving", update_period, count, [=](uint8_t r) {
+        set_retry("position_sync_while_moving", update_period, count, [=, this](uint8_t r) {
             this->door_position_update();
             return RetryResult::RETRY;
         });
@@ -519,7 +519,7 @@ namespace ratgdo {
 
     void RATGDOComponent::sync()
     {
-        auto sync_step = [=]() {
+        auto sync_step = [=, this]() {
             if (*this->door_state == DoorState::UNKNOWN) {
                 this->send_command(Command::GET_STATUS);
                 return RetryResult::RETRY;
@@ -533,7 +533,7 @@ namespace ratgdo {
 
         const uint8_t MAX_ATTEMPTS = 10;
         set_retry(
-            500, MAX_ATTEMPTS, [=](uint8_t r) {
+            500, MAX_ATTEMPTS, [=, this](uint8_t r) {
                 auto result = sync_step();
                 if (result == RetryResult::RETRY) {
                     if (r == MAX_ATTEMPTS - 2 && *this->door_state == DoorState::UNKNOWN) { // made a few attempts and no progress (door state is the first sync request)
@@ -569,7 +569,7 @@ namespace ratgdo {
         if (*this->door_state == DoorState::OPENING) {
             // have to stop door first, otherwise close command is ignored
             this->door_command(data::DOOR_STOP);
-            this->door_state_received.then([=](DoorState s) {
+            this->door_state_received.then([=, this](DoorState s) {
                 if (s == DoorState::STOPPED) {
                     this->door_command(data::DOOR_CLOSE);
                 } else {
@@ -600,7 +600,7 @@ namespace ratgdo {
     {
         if (*this->door_state == DoorState::OPENING || *this->door_state == DoorState::CLOSING) {
             this->door_command(data::DOOR_STOP);
-            this->door_state_received.then([=](DoorState s) {
+            this->door_state_received.then([=, this](DoorState s) {
                 if (s == DoorState::STOPPED) {
                     this->door_move_to_position(position);
                 }
@@ -625,7 +625,7 @@ namespace ratgdo {
         ESP_LOGD(TAG, "Moving to position %.2f in %.1fs", position, operation_time / 1000.0);
 
         this->door_command(delta > 0 ? data::DOOR_OPEN : data::DOOR_CLOSE);
-        set_timeout("move_to_position", operation_time, [=] {
+        set_timeout("move_to_position", operation_time, [=, this] {
             this->ensure_door_command(data::DOOR_STOP);
         });
     }
@@ -647,8 +647,8 @@ namespace ratgdo {
     {
         data |= (1 << 16); // button 1 ?
         data |= (1 << 8); // button press
-        this->send_command(Command::DOOR_ACTION, data, false, [=]() {
-            set_timeout(100, [=] {
+        this->send_command(Command::DOOR_ACTION, data, false, [=, this]() {
+            set_timeout(100, [=, this] {
                 auto data2 = data & ~(1 << 8); // button release
                 this->send_command(Command::DOOR_ACTION, data2);
             });
@@ -661,7 +661,7 @@ namespace ratgdo {
             ESP_LOGW(TAG, "It's not recommended to use ensure_door_command with non-idempotent commands such as DOOR_TOGGLE");
         }
         auto prev_door_state = *this->door_state;
-        this->door_state_received.then([=](DoorState s) {
+        this->door_state_received.then([=, this](DoorState s) {
             if ((data == data::DOOR_STOP) && (s != DoorState::STOPPED) && !(prev_door_state == DoorState::OPENING && s == DoorState::OPEN) && !(prev_door_state == DoorState::CLOSING && s == DoorState::CLOSED)) {
                 return;
             }
@@ -677,7 +677,7 @@ namespace ratgdo {
         });
         this->door_command(data);
         ESP_LOG1(TAG, "Ensure door command, setup door command retry");
-        set_timeout("door_command_retry", delay, [=]() {
+        set_timeout("door_command_retry", delay, [=, this]() {
             this->ensure_door_command(data);
         });
     }
@@ -728,52 +728,52 @@ namespace ratgdo {
     {
         // change update to children is defered until after component loop
         // if multiple changes occur during component loop, only the last one is notified
-        this->rolling_code_counter.subscribe([=](uint32_t state) { defer("rolling_code_counter", [=] { f(state); }); });
+        this->rolling_code_counter.subscribe([=, this](uint32_t state) { defer("rolling_code_counter", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_opening_duration(std::function<void(float)>&& f)
     {
-        this->opening_duration.subscribe([=](float state) { defer("opening_duration", [=] { f(state); }); });
+        this->opening_duration.subscribe([=, this](float state) { defer("opening_duration", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_closing_duration(std::function<void(float)>&& f)
     {
-        this->closing_duration.subscribe([=](float state) { defer("closing_duration", [=] { f(state); }); });
+        this->closing_duration.subscribe([=, this](float state) { defer("closing_duration", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_openings(std::function<void(uint16_t)>&& f)
     {
-        this->openings.subscribe([=](uint16_t state) { defer("openings", [=] { f(state); }); });
+        this->openings.subscribe([=, this](uint16_t state) { defer("openings", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_door_state(std::function<void(DoorState, float)>&& f)
     {
-        this->door_state.subscribe([=](DoorState state) {
-            defer("door_state", [=] { f(state, *this->door_position); });
+        this->door_state.subscribe([=, this](DoorState state) {
+            defer("door_state", [=, this] { f(state, *this->door_position); });
         });
-        this->door_position.subscribe([=](float position) {
-            defer("door_state", [=] { f(*this->door_state, position); });
+        this->door_position.subscribe([=, this](float position) {
+            defer("door_state", [=, this] { f(*this->door_state, position); });
         });
     }
     void RATGDOComponent::subscribe_light_state(std::function<void(LightState)>&& f)
     {
-        this->light_state.subscribe([=](LightState state) { defer("light_state", [=] { f(state); }); });
+        this->light_state.subscribe([=, this](LightState state) { defer("light_state", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_lock_state(std::function<void(LockState)>&& f)
     {
-        this->lock_state.subscribe([=](LockState state) { defer("lock_state", [=] { f(state); }); });
+        this->lock_state.subscribe([=, this](LockState state) { defer("lock_state", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_obstruction_state(std::function<void(ObstructionState)>&& f)
     {
-        this->obstruction_state.subscribe([=](ObstructionState state) { defer("obstruction_state", [=] { f(state); }); });
+        this->obstruction_state.subscribe([=, this](ObstructionState state) { defer("obstruction_state", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_motor_state(std::function<void(MotorState)>&& f)
     {
-        this->motor_state.subscribe([=](MotorState state) { defer("motor_state", [=] { f(state); }); });
+        this->motor_state.subscribe([=, this](MotorState state) { defer("motor_state", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_button_state(std::function<void(ButtonState)>&& f)
     {
-        this->button_state.subscribe([=](ButtonState state) { defer("button_state", [=] { f(state); }); });
+        this->button_state.subscribe([=, this](ButtonState state) { defer("button_state", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_motion_state(std::function<void(MotionState)>&& f)
     {
-        this->motion_state.subscribe([=](MotionState state) { defer("motion_state", [=] { f(state); }); });
+        this->motion_state.subscribe([=, this](MotionState state) { defer("motion_state", [=, this] { f(state); }); });
     }
     void RATGDOComponent::subscribe_sync_failed(std::function<void(bool)>&& f)
     {
