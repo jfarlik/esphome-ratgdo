@@ -637,19 +637,19 @@ namespace ratgdo {
             this->ensure_door_command(data::DOOR_STOP);
         });
     }
-
     void RATGDOComponent::cancel_position_sync_callbacks()
     {
         if (this->door_start_moving != 0) {
             ESP_LOGD(TAG, "Cancelling position callbacks");
             cancel_timeout("move_to_position");
-            cancel_retry("position_sync_while_moving");
+            cancel_interval("position_sync_while_moving");
 
             this->door_start_moving = 0;
             this->door_start_position = DOOR_POSITION_UNKNOWN;
             this->door_move_delta = DOOR_DELTA_UNKNOWN;
         }
     }
+
 
     void RATGDOComponent::door_command(uint32_t data)
     {
