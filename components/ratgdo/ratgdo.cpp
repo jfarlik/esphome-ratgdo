@@ -530,24 +530,32 @@ namespace ratgdo {
         };
 
         const uint8_t MAX_ATTEMPTS = 10;
-        set_retry(
-            500, MAX_ATTEMPTS, [=, this](uint8_t r) {
-                auto result = sync_step();
-                if (result == RetryResult::RETRY) {
-                    if (r == MAX_ATTEMPTS - 2 && *this->door_state == DoorState::UNKNOWN) { // made a few attempts and no progress (door state is the first sync request)
-                        // increment rolling code counter by some amount in case we crashed without writing to flash the latest value
-                        this->increment_rolling_code_counter(MAX_CODES_WITHOUT_FLASH_WRITE);
-                    }
-                    if (r == 0) {
-                        // this was last attempt, notify of sync failure
-                        ESP_LOGD(TAG, "Triggering sync failed actions.");
-                        this->sync_failed = true;
-                    }
-                }
-                return result;
-            },
-            1.5f);
-    }
+        uint32_t delay_ms = 500;
+        std::function<void(uint8_t)> sync_retry;
+        sync_retry = [this, delay_ms, &sync_retry](uint8_t attempt) {
+            auto result = sync_step();
+            if (result == RetryResult::DONE) {
+                return;
+            }
+
+            if (attempt == 0) {
+                ESP_LOGD(TAG, "Triggering sync failed actions.");
+                this->sync_failed = true;
+            }
+
+            if (attempt == MAX_ATTEMPTS - 2 && *this->door_state == DoorState::UNKNOWN) {
+                this->increment_rolling_code_counter(MAX_CODES_WITHOUT_FLASH_WRITE);
+            }
+
+            if (attempt < MAX_ATTEMPTS - 1) {
+                // exponential backoff: delay_ms *= 1.5
+                uint32_t next_delay = static_cast<uint32_t>(delay_ms * 1.5f);
+                this->set_timeout("sync_retry_" + std::to_string(attempt + 1), next_delay, [this, next_delay, &sync_retry, attempt + 1]() {
+                    sync_retry(attempt + 1);
+                });
+            }
+        };
+        sync_retry(0);
 
     void RATGDOComponent::open_door()
     {
@@ -633,7 +641,7 @@ namespace ratgdo {
         if (this->door_start_moving != 0) {
             ESP_LOGD(TAG, "Cancelling position callbacks");
             cancel_timeout("move_to_position");
-            cancel_retry("position_sync_while_moving");
+            cancel_interval("position_sync_while_moving");
 
             this->door_start_moving = 0;
             this->door_start_position = DOOR_POSITION_UNKNOWN;
