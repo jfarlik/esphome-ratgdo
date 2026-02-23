@@ -191,6 +191,8 @@ namespace ratgdo {
         void subscribe_button_state(std::function<void(ButtonState)>&& f);
         void subscribe_motion_state(std::function<void(MotionState)>&& f);
         void subscribe_sync_failed(std::function<void(bool)>&& f);
+    private:
+        void run_sync_step(uint8_t attempt, uint32_t delay);
 
     protected:
         // tx data
