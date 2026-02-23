@@ -515,11 +515,13 @@ namespace ratgdo {
         return true;
     }
 
-    void RATGDOComponent::sync() {
-    static uint8_t attempt = 10; // MAX_ATTEMPTS
-    static uint32_t current_delay = 500;
+void RATGDOComponent::sync() {
+    // Attempt counter and initial delay
+    uint8_t initial_attempts = 10;
+    uint32_t initial_delay = 500;
 
-    auto sync_step = [=, this]() {
+    // This defines the logic for each individual check
+    auto sync_step = [this]() -> RetryResult {
         if (*this->door_state == DoorState::UNKNOWN) {
             this->send_command(Command::GET_STATUS);
             return RetryResult::RETRY;
@@ -531,32 +533,37 @@ namespace ratgdo {
         return RetryResult::DONE;
     };
 
-    std::function<void(uint8_t, uint32_t)> run_sync;
-    run_sync = [=, this, &run_sync](uint8_t r, uint32_t delay) {
-        auto result = sync_step();
+    // Use a named timeout loop to replace set_retry
+    this->set_timeout("sync_retry", initial_delay, [this, sync_step, initial_attempts, initial_delay]() {
+        // Create a persistent lambda to handle the loop
+        std::function<void(uint8_t, uint32_t)> run_loop;
+        run_loop = [this, sync_step, &run_loop](uint8_t r, uint32_t delay) {
+            auto result = sync_step();
 
-        if (result == RetryResult::RETRY) {
-            if (r > 1) {
-                // If we are at attempt 2 (equivalent to MAX_ATTEMPTS - 2 in old logic)
-                if (r == 2 && *this->door_state == DoorState::UNKNOWN) {
-                    this->increment_rolling_code_counter(MAX_CODES_WITHOUT_FLASH_WRITE);
+            if (result == RetryResult::RETRY) {
+                if (r > 1) {
+                    // Logic for "near the end" attempt
+                    if (r == 2 && *this->door_state == DoorState::UNKNOWN) {
+                        this->increment_rolling_code_counter(MAX_CODES_WITHOUT_FLASH_WRITE);
+                    }
+
+                    // Schedule next attempt with 1.5x backoff
+                    uint32_t next_delay = (uint32_t)(delay * 1.5f);
+                    this->set_timeout("sync_retry", delay, [this, r, next_delay, &run_loop]() {
+                        run_loop(r - 1, next_delay);
+                    });
+                } else {
+                    // Last attempt failed
+                    ESP_LOGD(TAG, "Triggering sync failed actions.");
+                    this->sync_failed = true;
                 }
-
-                // Schedule next attempt with exponential backoff (1.5f)
-                uint32_t next_delay = (uint32_t)(delay * 1.5f);
-                this->set_timeout("sync_retry", delay, [=, &run_sync]() {
-                    run_sync(r - 1, next_delay);
-                });
-            } else {
-                // This was the last attempt (r == 1)
-                ESP_LOGD(TAG, "Triggering sync failed actions.");
-                this->sync_failed = true;
             }
-        }
-    };
-
-    run_sync(10, 500); 
+        };
+        
+        run_loop(initial_attempts, initial_delay);
+    });
 }
+
 
 
     void RATGDOComponent::open_door()
