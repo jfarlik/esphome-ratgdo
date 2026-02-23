@@ -259,11 +259,9 @@ namespace ratgdo {
     {
         ESP_LOG1(TAG, "Schedule position sync: delta %f, start position: %f, start moving: %d",
             this->door_move_delta, this->door_start_position, this->door_start_moving);
-        auto duration = this->door_move_delta > 0 ? *this->opening_duration : *this->closing_duration;
-        auto count = int(1000 * duration / update_period);
-        set_retry("position_sync_while_moving", update_period, count, [=, this](uint8_t r) {
+        this->cancel_interval("position_sync_while_moving");
+        this->set_interval("position_sync_while_moving", (uint32_t)update_period, [=, this]() {
             this->door_position_update();
-            return RetryResult::RETRY;
         });
     }
 
