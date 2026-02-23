@@ -515,56 +515,39 @@ namespace ratgdo {
         return true;
     }
 
-void RATGDOComponent::sync() {
-    // Attempt counter and initial delay
-    uint8_t initial_attempts = 10;
-    uint32_t initial_delay = 500;
+    void RATGDOComponent::sync()
+    {
+        auto sync_step = [=, this]() {
+            if (*this->door_state == DoorState::UNKNOWN) {
+                this->send_command(Command::GET_STATUS);
+                return RetryResult::RETRY;
+            }
+            if (*this->openings == 0) {
+                this->send_command(Command::GET_OPENINGS);
+                return RetryResult::RETRY;
+            }
+            return RetryResult::DONE;
+        };
 
-    // This defines the logic for each individual check
-    auto sync_step = [this]() -> RetryResult {
-        if (*this->door_state == DoorState::UNKNOWN) {
-            this->send_command(Command::GET_STATUS);
-            return RetryResult::RETRY;
-        }
-        if (*this->openings == 0) {
-            this->send_command(Command::GET_OPENINGS);
-            return RetryResult::RETRY;
-        }
-        return RetryResult::DONE;
-    };
-
-    // Use a named timeout loop to replace set_retry
-    this->set_timeout("sync_retry", initial_delay, [this, sync_step, initial_attempts, initial_delay]() {
-        // Create a persistent lambda to handle the loop
-        std::function<void(uint8_t, uint32_t)> run_loop;
-        run_loop = [this, sync_step, &run_loop](uint8_t r, uint32_t delay) {
-            auto result = sync_step();
-
-            if (result == RetryResult::RETRY) {
-                if (r > 1) {
-                    // Logic for "near the end" attempt
-                    if (r == 2 && *this->door_state == DoorState::UNKNOWN) {
+        const uint8_t MAX_ATTEMPTS = 10;
+        set_retry(
+            500, MAX_ATTEMPTS, [=, this](uint8_t r) {
+                auto result = sync_step();
+                if (result == RetryResult::RETRY) {
+                    if (r == MAX_ATTEMPTS - 2 && *this->door_state == DoorState::UNKNOWN) { // made a few attempts and no progress (door state is the first sync request)
+                        // increment rolling code counter by some amount in case we crashed without writing to flash the latest value
                         this->increment_rolling_code_counter(MAX_CODES_WITHOUT_FLASH_WRITE);
                     }
-
-                    // Schedule next attempt with 1.5x backoff
-                    uint32_t next_delay = (uint32_t)(delay * 1.5f);
-                    this->set_timeout("sync_retry", delay, [this, r, next_delay, &run_loop]() {
-                        run_loop(r - 1, next_delay);
-                    });
-                } else {
-                    // Last attempt failed
-                    ESP_LOGD(TAG, "Triggering sync failed actions.");
-                    this->sync_failed = true;
+                    if (r == 0) {
+                        // this was last attempt, notify of sync failure
+                        ESP_LOGD(TAG, "Triggering sync failed actions.");
+                        this->sync_failed = true;
+                    }
                 }
-            }
-        };
-        
-        run_loop(initial_attempts, initial_delay);
-    });
-}
-
-
+                return result;
+            },
+            1.5f);
+    }
 
     void RATGDOComponent::open_door()
     {
@@ -644,19 +627,19 @@ void RATGDOComponent::sync() {
             this->ensure_door_command(data::DOOR_STOP);
         });
     }
+
     void RATGDOComponent::cancel_position_sync_callbacks()
     {
         if (this->door_start_moving != 0) {
             ESP_LOGD(TAG, "Cancelling position callbacks");
             cancel_timeout("move_to_position");
-            cancel_interval("position_sync_while_moving");
+            cancel_retry("position_sync_while_moving");
 
             this->door_start_moving = 0;
             this->door_start_position = DOOR_POSITION_UNKNOWN;
             this->door_move_delta = DOOR_DELTA_UNKNOWN;
         }
     }
-
 
     void RATGDOComponent::door_command(uint32_t data)
     {
