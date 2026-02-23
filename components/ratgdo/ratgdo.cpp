@@ -516,78 +516,76 @@ namespace ratgdo {
     }
 
 	void RATGDOComponent::sync() {
-		const uint8_t MAX_ATTEMPTS = 10;
-		const uint32_t INITIAL_DELAY_MS = 500;
-		const float BACKOFF_MULTIPLIER = 1.5f;
-	
-		auto sync_step = [this]() -> RetryResult {
-			if (*this->door_state == DoorState::UNKNOWN) {
-				this->send_command(Command::GET_STATUS);
-				return RetryResult::RETRY;
-			}
-			if (*this->openings == 0) {
-				this->send_command(Command::GET_OPENINGS);
-				return RetryResult::RETRY;
-			}
-			return RetryResult::DONE;
-		};
-	
-		std::function<void(uint8_t, uint32_t)> run_sync_loop;
-		run_sync_loop = [this, sync_step, &run_sync_loop, BACKOFF_MULTIPLIER](uint8_t current_attempt, uint32_t current_delay) {
-			auto result = sync_step();
-	
-			if (result == RetryResult::RETRY) {
-				if (current_attempt < MAX_ATTEMPTS) {
-					if (current_attempt == MAX_ATTEMPTS - 2 && *this->door_state == DoorState::UNKNOWN) {
-						this->increment_rolling_code_counter(MAX_CODES_WITHOUT_FLASH_WRITE);
-					}
-	
-					uint32_t next_delay = (uint32_t)(current_delay * BACKOFF_MULTIPLIER);
-					this->set_timeout("sync_retry", current_delay, [this, next_delay, current_attempt, &run_sync_loop]() {
-						run_sync_loop(current_attempt + 1, next_delay);
-					});
-				} else {
-					ESP_LOGD(TAG, "Triggering sync failed actions.");
-					this->sync_failed = true;
-				}
-			}
-		};
-	
-		this->set_timeout("sync_retry", 0, [=, this, &run_sync_loop]() {
-			run_sync_loop(1, INITIAL_DELAY_MS);
+		// Start the first attempt after a 500ms initial delay
+		this->set_timeout("sync_retry", 500, [this]() {
+			this->run_sync_step(1, 500);
 		});
 	}
-
-    void RATGDOComponent::open_door()
-    {
-        if (*this->door_state == DoorState::OPENING) {
-            return; // gets ignored by opener
-        }
-
-        this->door_command(data::DOOR_OPEN);
-    }
-
-    void RATGDOComponent::close_door()
-    {
-        if (*this->door_state == DoorState::CLOSING) {
-            return; // gets ignored by opener
-        }
-
-        if (*this->door_state == DoorState::OPENING) {
-            // have to stop door first, otherwise close command is ignored
-            this->door_command(data::DOOR_STOP);
-            this->door_state_received.then([=, this](DoorState s) {
-                if (s == DoorState::STOPPED) {
-                    this->door_command(data::DOOR_CLOSE);
-                } else {
-                    ESP_LOGW(TAG, "Door did not stop, ignoring close command");
-                }
-            });
-            return;
-        }
-
-        this->door_command(data::DOOR_CLOSE);
-    }
+	
+	void RATGDOComponent::run_sync_step(uint8_t attempt, uint32_t delay) {
+		const uint8_t MAX_ATTEMPTS = 10;
+		const float BACKOFF_MULTIPLIER = 1.5f;
+	
+		// Perform the check
+		if (*this->door_state != DoorState::UNKNOWN && *this->openings != 0) {
+			return; // DONE: No more retries needed
+		}
+	
+		// If we reach here, we need to RETRY
+		if (*this->door_state == DoorState::UNKNOWN) {
+			this->send_command(Command::GET_STATUS);
+		} else if (*this->openings == 0) {
+			this->send_command(Command::GET_OPENINGS);
+		}
+	
+		if (attempt < MAX_ATTEMPTS) {
+			// Rolling code recovery logic
+			if (attempt == MAX_ATTEMPTS - 2 && *this->door_state == DoorState::UNKNOWN) {
+				this->increment_rolling_code_counter(MAX_CODES_WITHOUT_FLASH_WRITE);
+			}
+	
+			// Schedule next attempt with backoff
+			uint32_t next_delay = (uint32_t)(delay * BACKOFF_MULTIPLIER);
+			this->set_timeout("sync_retry", delay, [this, attempt, next_delay]() {
+				this->run_sync_step(attempt + 1, next_delay);
+			});
+		} else {
+			ESP_LOGD(TAG, "Sync failed after %d attempts.", MAX_ATTEMPTS);
+			this->sync_failed = true;
+		}
+	}
+	
+	
+		void RATGDOComponent::open_door()
+		{
+			if (*this->door_state == DoorState::OPENING) {
+				return; // gets ignored by opener
+			}
+	
+			this->door_command(data::DOOR_OPEN);
+		}
+	
+		void RATGDOComponent::close_door()
+		{
+			if (*this->door_state == DoorState::CLOSING) {
+				return; // gets ignored by opener
+			}
+	
+			if (*this->door_state == DoorState::OPENING) {
+				// have to stop door first, otherwise close command is ignored
+				this->door_command(data::DOOR_STOP);
+				this->door_state_received.then([=, this](DoorState s) {
+					if (s == DoorState::STOPPED) {
+						this->door_command(data::DOOR_CLOSE);
+					} else {
+						ESP_LOGW(TAG, "Door did not stop, ignoring close command");
+					}
+				});
+				return;
+			}
+	
+			this->door_command(data::DOOR_CLOSE);
+		}
 
     void RATGDOComponent::stop_door()
     {
