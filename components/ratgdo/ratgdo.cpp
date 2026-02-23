@@ -515,46 +515,48 @@ namespace ratgdo {
         return true;
     }
 
-    void RATGDOComponent::sync() {
-        const uint8_t MAX_ATTEMPTS = 10;
-        const uint32_t INITIAL_DELAY_MS = 500;
-        const float BACKOFF_MULTIPLIER = 1.5f;
-
-        auto sync_step = [this]() -> RetryResult {
-            if (*this->door_state == DoorState::UNKNOWN) {
-                this->send_command(Command::GET_STATUS);
-                return RetryResult::RETRY;
-            }
-            if (*this->openings == 0) {
-                this->send_command(Command::GET_OPENINGS);
-                return RetryResult::RETRY;
-            }
-            return RetryResult::DONE;
-        };
-
-        std::function<void(uint8_t, uint32_t)> run_sync_loop;
-        run_sync_loop = [this, sync_step, &run_sync_loop](uint8_t current_attempt, uint32_t current_delay) {
-            auto result = sync_step();
-
-            if (result == RetryResult::RETRY) {
-                if (current_attempt < MAX_ATTEMPTS) {
-                    if (current_attempt == MAX_ATTEMPTS - 2 && *this->door_state == DoorState::UNKNOWN) {
-                        this->increment_rolling_code_counter(MAX_CODES_WITHOUT_FLASH_WRITE);
-                    }
-                    uint32_t next_delay = (uint32_t)(current_delay * BACKOFF_MULTIPLIER);
-                    this->set_timeout("sync_retry", current_delay, [this, next_delay, current_attempt, &run_sync_loop]() {
-                        run_sync_loop(current_attempt + 1, next_delay);
-                    });
-                } else {
-                    ESP_LOGD(TAG, "Triggering sync failed actions.");
-                    this->sync_failed = true;
-                }
-            }
-        };
-        this->set_timeout("sync_retry", 0, [=, this, &run_sync_loop]() {
-            run_sync_loop(1, INITIAL_DELAY_MS);
-        });
-    }
+	void RATGDOComponent::sync() {
+		const uint8_t MAX_ATTEMPTS = 10;
+		const uint32_t INITIAL_DELAY_MS = 500;
+		const float BACKOFF_MULTIPLIER = 1.5f;
+	
+		auto sync_step = [this]() -> RetryResult {
+			if (*this->door_state == DoorState::UNKNOWN) {
+				this->send_command(Command::GET_STATUS);
+				return RetryResult::RETRY;
+			}
+			if (*this->openings == 0) {
+				this->send_command(Command::GET_OPENINGS);
+				return RetryResult::RETRY;
+			}
+			return RetryResult::DONE;
+		};
+	
+		std::function<void(uint8_t, uint32_t)> run_sync_loop;
+		run_sync_loop = [this, sync_step, &run_sync_loop, BACKOFF_MULTIPLIER](uint8_t current_attempt, uint32_t current_delay) {
+			auto result = sync_step();
+	
+			if (result == RetryResult::RETRY) {
+				if (current_attempt < MAX_ATTEMPTS) {
+					if (current_attempt == MAX_ATTEMPTS - 2 && *this->door_state == DoorState::UNKNOWN) {
+						this->increment_rolling_code_counter(MAX_CODES_WITHOUT_FLASH_WRITE);
+					}
+	
+					uint32_t next_delay = (uint32_t)(current_delay * BACKOFF_MULTIPLIER);
+					this->set_timeout("sync_retry", current_delay, [this, next_delay, current_attempt, &run_sync_loop]() {
+						run_sync_loop(current_attempt + 1, next_delay);
+					});
+				} else {
+					ESP_LOGD(TAG, "Triggering sync failed actions.");
+					this->sync_failed = true;
+				}
+			}
+		};
+	
+		this->set_timeout("sync_retry", 0, [=, this, &run_sync_loop]() {
+			run_sync_loop(1, INITIAL_DELAY_MS);
+		});
+	}
 
     void RATGDOComponent::open_door()
     {
